@@ -1855,8 +1855,11 @@ static float make_qkx2_quants(int n, int nmax, const float * restrict x, const f
             l = MAX(0, MIN(nmax, l));
             Laux[i] = l;
             float w = weights[i];
+            //sum_l 表示量化后值的加权和
             sum_l += w*l;
+            //sum_l2 表示量化后的值的平方加权和
             sum_l2 += w*l*l;
+            // 原始值 x 和其对应量化值的乘积的加权和。
             sum_xl += w*l*x[i];
         }
         float D = sum_w * sum_l2 - sum_l * sum_l;
@@ -2475,17 +2478,25 @@ size_t quantize_q3_K(const float * restrict src, void * restrict dst, int64_t nr
 
 void quantize_row_q4_K_reference(const float * restrict x, block_q4_K * restrict y, int64_t k) {
     assert(k % QK_K == 0);
+    /* 因为GGML_TYPE_Q4_K 量化方式中，super-blocks 会包含8个blocks, 
+       而每个block会包含32 个weights, 因此一个super-blocks 将会包含256 个weights
+       因此在QK_K宏定义的值为256
+    */
+
+    // nb表示一个需要分成多少个 super blocks
     const int nb = k / QK_K;
 
     uint8_t L[QK_K];
     uint8_t Laux[32];
     float   weights[32];
-    float mins[QK_K/32];
+    // QK_K/32 表示了super_blocks 中所包含的8个小block
+    float mins[QK_K/32]; 
     float scales[QK_K/32];
-
+    // 遍历super blocks
     for (int i = 0; i < nb; i++) {
         float max_scale = 0; // as we are deducting the min, scales are always positive
         float max_min = 0;
+        // 遍历 block
         for (int j = 0; j < QK_K/32; ++j) {
             //scales[j] = make_qkx1_quants(32, 15, x + 32*j, L + 32*j, &mins[j], 9, 0.5f);
             float sum_x2 = 0;
@@ -2502,7 +2513,7 @@ void quantize_row_q4_K_reference(const float * restrict x, block_q4_K * restrict
                 max_min = min;
             }
         }
-
+        // 对scale,min使用6-bits 进行的量化存储
         float inv_scale = max_scale > 0 ? 63.f/max_scale : 0.f;
         float inv_min   = max_min   > 0 ? 63.f/max_min   : 0.f;
         for (int j = 0; j < QK_K/32; ++j) {
@@ -2514,16 +2525,21 @@ void quantize_row_q4_K_reference(const float * restrict x, block_q4_K * restrict
                 y[i].scales[j] = ls;
                 y[i].scales[j+4] = lm;
             } else {
+                // ls的低四位与lm的低四位组成新的uint8_t数据，lm的第四位存储在uint8_t的高位
                 y[i].scales[j+4] = (ls & 0xF) | ((lm & 0xF) << 4);
+                // 将ls的高两位，存储到index 为j-4 的高两位
                 y[i].scales[j-4] |= ((ls >> 4) << 6);
+                // 将lm的高两位，存储到index 为j 的高两位
                 y[i].scales[j-0] |= ((lm >> 4) << 6);
             }
         }
+        // FP32 转 FP16 时 y[i].d ，超出范围的截断，即为0
         y[i].d = GGML_FP32_TO_FP16(max_scale/63.f);
         y[i].dmin = GGML_FP32_TO_FP16(max_min/63.f);
 
         uint8_t sc, m;
         for (int j = 0; j < QK_K/32; ++j) {
+            // get_scale_min_k4 从scales 数组中获取block scale 以及min
             get_scale_min_k4(j, y[i].scales, &sc, &m);
             const float d = GGML_FP16_TO_FP32(y[i].d) * sc;
             if (!d) continue;
@@ -2540,7 +2556,7 @@ void quantize_row_q4_K_reference(const float * restrict x, block_q4_K * restrict
             for (int l = 0; l < 32; ++l) q[l] = L[j + l] | (L[j + l + 32] << 4);
             q += 32;
         }
-
+        // 数据指针指向下一个super block 位置
         x += QK_K;
     }
 }

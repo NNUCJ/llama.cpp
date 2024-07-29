@@ -16233,13 +16233,17 @@ static size_t llama_tensor_quantize_internal(enum ggml_type new_type, const floa
         size_t local_size = 0;
         while (true) {
             std::unique_lock<std::mutex> lock(mutex);
+            // 更新并获取当前处理的行：
+            // 将 counter 的当前值赋给 first_row，然后更新 counter，以便下一次循环中能处理下一块数据。 
             int64_t first_row = counter; counter += nrows_per_chunk;
+            // 检查数据是否超行，如果 first_row 超出了总行数 nrows，则更新 new_size（如果有处理的本地大小），然后跳出循环
             if (first_row >= nrows) {
                 if (local_size > 0) {
                     new_size += local_size;
                 }
                 break;
             }
+            // 解锁后，继续处理数据，允许其他线程访问 counter。
             lock.unlock();
             const int64_t this_nrow = std::min(nrows - first_row, nrows_per_chunk);
             size_t this_size = ggml_quantize_chunk(new_type, f32_data, new_data, first_row * n_per_row, this_nrow, n_per_row, imatrix);
@@ -16312,6 +16316,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
 
     if (nthread <= 0) {
         nthread = std::thread::hardware_concurrency();
+        // nthread = 1;
     }
 
     // mmap consistently increases speed Linux, and also increases speed on Windows with
@@ -16586,6 +16591,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
                     }
                 }
             }
+            // 确定在进行低比特量化时是否缺少重要性矩阵(importance matrix)
             if ((new_type == GGML_TYPE_IQ2_XXS ||
                  new_type == GGML_TYPE_IQ2_XS  ||
                  new_type == GGML_TYPE_IQ2_S   ||

@@ -3527,6 +3527,7 @@ static void ggml_scratch_load(struct ggml_context * ctx) {
 
 static struct ggml_object * ggml_new_object(struct ggml_context * ctx, enum ggml_object_type type, size_t size) {
     // always insert objects at the end of the context's memory pool
+    // 当第一次创建的ggml object时，obj_cur 为空指针。（ggml_Init 时指定）
     struct ggml_object * obj_cur = ctx->objects_end;
 
     const size_t cur_offs = obj_cur == NULL ? 0 : obj_cur->offs;
@@ -4245,8 +4246,9 @@ struct ggml_tensor * ggml_view_tensor(
 }
 
 struct ggml_tensor * ggml_get_first_tensor(const struct ggml_context * ctx) {
+    // 首先获取当前`ggml_context`结构体的`objects_begin`(存储的tensor data 的首地址)
     struct ggml_object * obj = ctx->objects_begin;
-
+    // 获取当前存储空间大小, 在初始化gguf_context时，params.no_alloc 为true, 该大小只包含GGML_tensor_size, 不包含所有tensor data所占内存
     char * const mem_buffer = ctx->mem_buffer;
 
     while (obj != NULL) {
@@ -4268,6 +4270,7 @@ struct ggml_tensor * ggml_get_next_tensor(const struct ggml_context * ctx, struc
 
     while (obj != NULL) {
         if (obj->type == GGML_OBJECT_TYPE_TENSOR) {
+            // obj->offs tensor data 相对起始位置的偏移
             return (struct ggml_tensor *)(mem_buffer + obj->offs);
         }
 

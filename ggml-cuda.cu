@@ -1010,12 +1010,12 @@ GGML_CALL static ggml_backend_buffer_t ggml_backend_cuda_host_buffer_type_alloc_
 GGML_CALL ggml_backend_buffer_type_t ggml_backend_cuda_host_buffer_type() {
     static struct ggml_backend_buffer_type ggml_backend_cuda_buffer_type_host = {
         /* .iface    = */ {
-            /* .get_name         = */ ggml_backend_cuda_host_buffer_type_name,
-            /* .alloc_buffer     = */ ggml_backend_cuda_host_buffer_type_alloc_buffer,
-            /* .get_alignment    = */ ggml_backend_cpu_buffer_type()->iface.get_alignment,
-            /* .get_max_size     = */ NULL, // defaults to SIZE_MAX
-            /* .get_alloc_size   = */ ggml_backend_cpu_buffer_type()->iface.get_alloc_size,
-            /* .is_host          = */ ggml_backend_cpu_buffer_type()->iface.is_host,
+            /* .get_name         = */ ggml_backend_cuda_host_buffer_type_name,   // 指向获取CUDA主机缓冲区类型名称的函数
+            /* .alloc_buffer     = */ ggml_backend_cuda_host_buffer_type_alloc_buffer, // 指向分配CUDA主机缓冲区的函数
+            /* .get_alignment    = */ ggml_backend_cpu_buffer_type()->iface.get_alignment,  // 调用CPU缓冲区类型的对齐获取函数，确保CUDA主机缓冲区的对齐方式与CPU一致
+            /* .get_max_size     = */ NULL, // defaults to SIZE_MAX 设置为 NULL，表示最大大小默认为 SIZE_MAX，即不限制。
+            /* .get_alloc_size   = */ ggml_backend_cpu_buffer_type()->iface.get_alloc_size, // 调用CPU缓冲区的分配大小获取函数
+            /* .is_host          = */ ggml_backend_cpu_buffer_type()->iface.is_host,   // 调用CPU缓冲区的判断是否为主机的函数
         },
         /* .context  = */ nullptr,
     };

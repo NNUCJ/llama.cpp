@@ -5487,22 +5487,28 @@ static bool llm_load_tensors(
         // calculate the split points
         int device_count = llama_get_device_count(model);
         bool all_zero = tensor_split == nullptr || std::all_of(tensor_split, tensor_split + device_count, [](float x) { return x == 0.0f; });
+        // splits vector 来存储分割到每个设备的内存大小
         std::vector<float> splits(device_count);
         if (all_zero) {
+            // 通过调用 llama_get_device_memory 函数获得每个设备的可用内存来初始化 splits 向量
             // default split, by free memory
             for (int i = 0; i < device_count; ++i) {
                 splits[i] = llama_get_device_memory(model, i);
             }
         } else {
+            // 如果 tensor_split 不全为零，则直接将其值复制到 splits 中
             std::copy(tensor_split, tensor_split + device_count, splits.begin());
         }
 
         // sum and normalize the splits to get the split points
+        // 计算分割点
         float split_sum = 0.0f;
         for (int i = 0; i < device_count; ++i) {
             split_sum += splits[i];
+            // 将每个分割点更新为当前的累加和
             splits[i] = split_sum;
         }
+        // 对分割值进行归一化
         for (int i = 0; i < device_count; ++i) {
             splits[i] /= split_sum;
         }
@@ -5510,10 +5516,12 @@ static bool llm_load_tensors(
         // assign the repeating layers to the devices according to the splits
         int act_gpu_layers = std::min(n_gpu_layers, (int)n_layer + 1);
         for (int64_t i = i_gpu_start; i < n_layer; ++i) {
+            // 找到当前层对应的分割，并将其分配到适当的 GPU
             int layer_gpu = std::upper_bound(splits.begin(), splits.begin() + device_count, float(i - i_gpu_start)/act_gpu_layers) - splits.begin();
             model.buft_layer[i] = llama_default_buffer_type_offload(model, layer_gpu);
         }
-        // assign the output layer
+        // assign the output layer(分配输出层)
+        // 分配逻辑： 如果指定的分配的GPU 层数大于总层数，则输出层分配到GPU上，否则输出层在CPU上
         if (n_gpu_layers > n_layer) {
             int layer_gpu = std::upper_bound(splits.begin(), splits.begin() + device_count, float(act_gpu_layers - 1)/act_gpu_layers) - splits.begin();
             model.buft_output = llama_default_buffer_type_offload(model, layer_gpu);
@@ -5563,6 +5571,9 @@ static bool llm_load_tensors(
     // for moe merged tensors
     ctx_size += ggml_tensor_overhead()*n_layer*3;
 
+    // 为不同的张量缓冲区类型初始化上下文（context），并管理这些上下文以便在模型中使用
+
+    // 创建一个映射 ctx_map，将不同的缓冲区类型（ggml_backend_buffer_type_t）与其对应的上下文（ggml_context*）关联起来
     std::map<ggml_backend_buffer_type_t, ggml_context *> ctx_map;
     for (auto & it : buft_layer_count) {
         struct ggml_init_params params = {
@@ -5609,19 +5620,22 @@ static bool llm_load_tensors(
             case LLM_ARCH_LLAMA:
             case LLM_ARCH_REFACT:
             case LLM_ARCH_MINICPM:
-                {
+                {   
+                    // 创建token_embed tensor shape {n_embd, n_vocab}
                     model.tok_embd = ml.create_tensor(ctx_input, tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab});
 
                     // output
-                    {
+                    {   
+                        // 创建一个归一化输出张量 output_norm，形状为 {n_embd}。
                         model.output_norm = ml.create_tensor(ctx_output,       tn(LLM_TENSOR_OUTPUT_NORM, "weight"), {n_embd});
+                        // 创建一个输出张量 output，形状为 {n_embd, n_vocab}，并标记为非必需的（TENSOR_NOT_REQUIRED）
                         model.output = ml.create_tensor(ctx_output_split, tn(LLM_TENSOR_OUTPUT, "weight"), {n_embd, n_vocab}, llama_model_loader::TENSOR_NOT_REQUIRED);
                         // if output is NULL, init from the input tok embed
                         if (model.output == NULL) {
                             model.output = ml.create_tensor(ctx_output, tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, llama_model_loader::TENSOR_DUPLICATED);
                         }
                     }
-
+                    // 为每层创建Tensor
                     for (int i = 0; i < n_layer; ++i) {
                         ggml_context * ctx_layer = ctx_for_layer(i);
                         ggml_context * ctx_split = ctx_for_layer_split(i);
@@ -5629,21 +5643,25 @@ static bool llm_load_tensors(
                         auto & layer = model.layers[i];
 
                         layer.attn_norm = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_NORM, "weight", i), {n_embd});
-
+                        // 创建注意力层的权重张量，包括查询（wq）、键（wk）、值（wv）和输出（wo）的权重，分别指定了它们的形状
                         layer.wq = ml.create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_Q,   "weight", i), {n_embd, n_embd});
                         layer.wk = ml.create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_K,   "weight", i), {n_embd, n_embd_gqa});
                         layer.wv = ml.create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_V,   "weight", i), {n_embd, n_embd_gqa});
                         layer.wo = ml.create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd, n_embd});
 
-                        // optional bias tensors
+                        // optional bias tensors(创建注意力层的偏置张量，所有偏置张量都标记为非必需的)
                         layer.bq = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_Q,   "bias", i), {n_embd},     llama_model_loader::TENSOR_NOT_REQUIRED);
                         layer.bk = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_K,   "bias", i), {n_embd_gqa}, llama_model_loader::TENSOR_NOT_REQUIRED);
                         layer.bv = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_V,   "bias", i), {n_embd_gqa}, llama_model_loader::TENSOR_NOT_REQUIRED);
                         layer.bo = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_ATTN_OUT, "bias", i), {n_embd},     llama_model_loader::TENSOR_NOT_REQUIRED);
-
+                        
+                        // 创建前馈层的归一化张量 ffn_norm
                         layer.ffn_norm = ml.create_tensor(ctx_layer, tn(LLM_TENSOR_FFN_NORM, "weight", i), {n_embd});
 
+                        //  分支逻辑处理专家网络的情况
+                       
                         if (n_expert == 0) {
+                             // 1. 则为前馈网络的门控、下采样和上采样创建相应的张量
                             layer.ffn_gate = ml.create_tensor(ctx_split, tn(LLM_TENSOR_FFN_GATE, "weight", i), {n_embd,   n_ff});
                             layer.ffn_down = ml.create_tensor(ctx_split, tn(LLM_TENSOR_FFN_DOWN, "weight", i), {  n_ff, n_embd});
                             layer.ffn_up   = ml.create_tensor(ctx_split, tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd,   n_ff});
@@ -6883,10 +6901,13 @@ static bool llm_load_tensors(
     size_t n_max_backend_buffer = ctx_map.size() * ml.files.size();
     model.bufs.reserve(n_max_backend_buffer);
 
+    // 管理模型的缓冲区， 特别是在使用内存映射（mmap）和GPU加速的情况下
     for (auto & it : ctx_map) {
+        // 通过 ctx_map 遍历所有上下文。it.first 是缓冲区的类型，it.second 是对应的上下文
         ggml_backend_buffer_type_t buft = it.first;
         ggml_context * ctx              = it.second;
 
+        // 创建一个 bufs 映射，用于存储缓冲区，并预留空间以提高效率
         llama_buf_map bufs;
         bufs.reserve(n_max_backend_buffer);
 
@@ -6910,8 +6931,8 @@ static bool llm_load_tensors(
 #ifdef GGML_USE_CUDA
                 if (n_layer >= n_gpu_layers) {
                     ggml_backend_cuda_register_host_buffer(
-                        ggml_backend_buffer_get_base(buf),
-                        ggml_backend_buffer_get_size(buf));
+                        ggml_backend_buffer_get_base(buf),   // 获取缓冲区基地址
+                        ggml_backend_buffer_get_size(buf)); // 获取缓冲区大小
                 }
 #endif
             }
@@ -7119,7 +7140,7 @@ static struct ggml_tensor * llm_build_inp_embd(
 
         inpL = ggml_get_rows(ctx, tok_embd, lctx.inp_tokens);
     } else {
-       lctx.inp_embd = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, batch.n_tokens);
+        lctx.inp_embd = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, n_embd, batch.n_tokens);
         inpL = lctx.inp_embd;
         ggml_set_input(lctx.inp_embd);
     }

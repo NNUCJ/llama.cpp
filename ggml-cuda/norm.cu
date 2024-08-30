@@ -112,19 +112,19 @@ static __global__ void rms_norm_f32(const float * x, float * dst, const int ncol
     // sum up partial sums
     tmp = warp_reduce_sum(tmp);
     if (block_size > WARP_SIZE) {
-        __shared__ float s_sum[32];
+        __shared__ float s_sum[32];  // 存储每个warp的和
         int warp_id = threadIdx.x / WARP_SIZE;
         int lane_id = threadIdx.x % WARP_SIZE;
         if (lane_id == 0) {
-            s_sum[warp_id] = tmp;
+            s_sum[warp_id] = tmp;   // 将warp 的和存储到共享内存中
         }
         __syncthreads();
-        tmp = s_sum[lane_id];
-        tmp = warp_reduce_sum(tmp);
+        tmp = s_sum[lane_id];       // 从共享内存中加载
+        tmp = warp_reduce_sum(tmp); // 再次归约
     }
 
     const float mean = tmp / ncols;
-    const float scale = rsqrtf(mean + eps);
+    const float scale = rsqrtf(mean + eps);     // 计算归一化系数
 
     for (int col = tid; col < ncols; col += block_size) {
         dst[row*ncols + col] = scale * x[row*ncols + col];

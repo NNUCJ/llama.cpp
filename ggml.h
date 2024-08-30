@@ -637,17 +637,17 @@ extern "C" {
 
     // computation graph
     struct ggml_cgraph {
-        int size;
-        int n_nodes;
-        int n_leafs;
+        int size;       //  图中节点的总数
+        int n_nodes;    // 当前图中节点的数量
+        int n_leafs;    // 当前图中叶子节点的数量
 
-        struct ggml_tensor ** nodes;
-        struct ggml_tensor ** grads;
-        struct ggml_tensor ** leafs;
+        struct ggml_tensor ** nodes;    // 指向图中节点的指针数组 
+        struct ggml_tensor ** grads;    // 指向图中梯度的指针数组（如果需要计算梯度则使用）
+        struct ggml_tensor ** leafs;    // 指向图中叶子节点的指针数组
 
-        struct ggml_hash_set visited_hash_table;
+        struct ggml_hash_set visited_hash_table;     // 用于跟踪访问过的节点的哈希表
 
-        enum ggml_cgraph_eval_order order;
+        enum ggml_cgraph_eval_order order;      // 评估顺序，指定计算图的执行顺序
     };
 
     // scratch buffer

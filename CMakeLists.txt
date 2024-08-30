@@ -263,7 +263,7 @@ if (LLAMA_METAL)
             #       ref: https://github.com/ggerganov/whisper.cpp/issues/1720
             set(XC_FLAGS -fno-fast-math -fno-inline -g)
         else()
-            set(XC_FLAGS -O3)
+            set(XC_FLAGS -O0)
         endif()
 
         # Append macOS metal versioning flags
@@ -685,6 +685,8 @@ if (LLAMA_SYCL)
 
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+    # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0")
+
     if (LLAMA_SYCL_TARGET STREQUAL "NVIDIA")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsycl-targets=nvptx64-nvidia-cuda")
     endif()
@@ -932,28 +934,32 @@ if (LLAMA_ALL_WARNINGS)
     endif()
 endif()
 
-set(CUDA_CXX_FLAGS "")
+set(CUDA_CXX_FLAGS "-O0")
+# set(CUDA_CXX_FLAGS -G -O0)
 
 if (LLAMA_CUDA)
     set(CUDA_FLAGS -use_fast_math)
-
+    # set(CMAKE_CUDA_FLAGS "-G  -O0 ")
     if (LLAMA_FATAL_WARNINGS)
         list(APPEND CUDA_FLAGS -Werror all-warnings)
     endif()
-
+    set(CMAKE_CUDA_COMPILER "/usr/local/cuda-12.2/bin/nvcc")
     if (LLAMA_ALL_WARNINGS AND NOT MSVC)
         set(NVCC_CMD ${CMAKE_CUDA_COMPILER} .c)
         if (NOT CMAKE_CUDA_HOST_COMPILER STREQUAL "")
             list(APPEND NVCC_CMD -ccbin ${CMAKE_CUDA_HOST_COMPILER})
+            message("NVCC_CMD : ${NVCC_CMD}")
+            message("CMAKE_CUDA_HOST_COMPILER : ${CMAKE_CUDA_HOST_COMPILER}")
         endif()
-
+        message("NVCC_CMD : ${NVCC_CMD}")
         execute_process(
             COMMAND ${NVCC_CMD} -Xcompiler --version
             OUTPUT_VARIABLE CUDA_CCFULLVER
             ERROR_QUIET
         )
-
+        
         if (NOT CUDA_CCFULLVER MATCHES clang)
+            message("CUDA_CCFULLVER : ${CUDA_CCFULLVER}")
             set(CUDA_CCID "GNU")
             execute_process(
                 COMMAND ${NVCC_CMD} -Xcompiler "-dumpfullversion -dumpversion"
@@ -1191,6 +1197,8 @@ if (LLAMA_CUDA)
     if (NOT CUDA_CXX_FLAGS_JOINED STREQUAL "")
         list(APPEND CUDA_FLAGS -Xcompiler ${CUDA_CXX_FLAGS_JOINED})
     endif()
+    list(APPEND CUDA_FLAGS -G -g)
+    message("cuda flags ${CUDA_FLAGS}")
     add_compile_options("$<$<COMPILE_LANGUAGE:CUDA>:${CUDA_FLAGS}>")
 endif()
 

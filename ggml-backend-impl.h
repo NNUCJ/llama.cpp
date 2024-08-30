@@ -77,36 +77,41 @@ extern "C" {
 
     typedef void * ggml_backend_context_t;
 
+    // ggml_backend_i 结构体定义了一组函数指针，这些函数指针用于实现不同后端的计算与内存管理功能
     struct ggml_backend_i {
-        const char * (*GGML_CALL get_name)(ggml_backend_t backend);
+        const char * (*GGML_CALL get_name)(ggml_backend_t backend);  // 获取后端的名称
 
-        void (*GGML_CALL free)(ggml_backend_t backend);
+        void (*GGML_CALL free)(ggml_backend_t backend);     // 释放后端资源
 
-        // buffer allocation
+        // buffer allocation 获取后端的默认缓冲区类型，帮助在不同后端之间进行内存管理
         ggml_backend_buffer_type_t (*GGML_CALL get_default_buffer_type)(ggml_backend_t backend);
 
-        // (optional) asynchronous tensor data access
-        void (*GGML_CALL set_tensor_async)(ggml_backend_t backend,       struct ggml_tensor * tensor, const void * data, size_t offset, size_t size);
-        void (*GGML_CALL get_tensor_async)(ggml_backend_t backend, const struct ggml_tensor * tensor,       void * data, size_t offset, size_t size);
-        bool (*GGML_CALL cpy_tensor_async)(ggml_backend_t backend_src, ggml_backend_t backend_dst, const struct ggml_tensor * src, struct ggml_tensor * dst);
+        // (optional) asynchronous tensor data access 异步设置张量的数据，可以在不阻塞主线程的情况下更新张量的数据
+        void (*GGML_CALL set_tensor_async)(ggml_backend_t backend,       struct ggml_tensor * tensor, const void * data, size_t offset, size_t size); 
+        // 异步获取张量的数据，允许在后台获取数据而不影响主线程的运行
+        void (*GGML_CALL get_tensor_async)(ggml_backend_t backend, const struct ggml_tensor * tensor,       void * data, size_t offset, size_t size);  
+        // 异步复制张量的数据，支持源后端与目标后端之间的数据传输
+        bool (*GGML_CALL cpy_tensor_async)(ggml_backend_t backend_src, ggml_backend_t backend_dst, const struct ggml_tensor * src, struct ggml_tensor * dst); 
 
         // (optional) complete all pending operations
-        void (*GGML_CALL synchronize)(ggml_backend_t backend);
+        void (*GGML_CALL synchronize)(ggml_backend_t backend); // 完成所有挂起的操作，确保所有异步操作都已完成
 
         // compute graph with a plan (not used currently)
         // create a new plan for a graph
-        ggml_backend_graph_plan_t (*GGML_CALL graph_plan_create) (ggml_backend_t backend, const struct ggml_cgraph * cgraph);
-        void                      (*GGML_CALL graph_plan_free)   (ggml_backend_t backend, ggml_backend_graph_plan_t plan);
+        ggml_backend_graph_plan_t (*GGML_CALL graph_plan_create) (ggml_backend_t backend, const struct ggml_cgraph * cgraph); 
+        // 释放计算计划的资源
+        void                      (*GGML_CALL graph_plan_free)   (ggml_backend_t backend, ggml_backend_graph_plan_t plan); 
         // update the plan with a new graph - this should be faster than creating a new plan when the graph has the same topology
-        void                      (*GGML_CALL graph_plan_update) (ggml_backend_t backend, ggml_backend_graph_plan_t plan, const struct ggml_cgraph * cgraph);
-        // compute the graph with the plan
-        enum ggml_status          (*GGML_CALL graph_plan_compute)(ggml_backend_t backend, ggml_backend_graph_plan_t plan);
+        // 更新已有的计算计划，以便在保持拓扑结构不变的情况下提高效率
+        void                      (*GGML_CALL graph_plan_update) (ggml_backend_t backend, ggml_backend_graph_plan_t plan, const struct ggml_cgraph * cgraph);   
+        // compute the graph with the plan  使用计划计算图，执行计算
+        enum ggml_status          (*GGML_CALL graph_plan_compute)(ggml_backend_t backend, ggml_backend_graph_plan_t plan);      
 
         // compute graph without a plan (async)
-        enum ggml_status (*GGML_CALL graph_compute)     (ggml_backend_t backend, struct ggml_cgraph * cgraph);
+        enum ggml_status (*GGML_CALL graph_compute)     (ggml_backend_t backend, struct ggml_cgraph * cgraph); //执行计算图
 
         // check if the backend can compute an operation
-        bool (*GGML_CALL supports_op)(ggml_backend_t backend, const struct ggml_tensor * op);
+        bool (*GGML_CALL supports_op)(ggml_backend_t backend, const struct ggml_tensor * op);  
 
         // check if the backend can use tensors allocated in a buffer type
         bool (*GGML_CALL supports_buft)(ggml_backend_t backend, ggml_backend_buffer_type_t buft);
@@ -118,14 +123,14 @@ extern "C" {
 
         // (optional) event synchronization
         // create a new event that can record events on this backend instance
-        ggml_backend_event_t (*GGML_CALL event_new)         (ggml_backend_t backend);
-        void                 (*GGML_CALL event_free)        (ggml_backend_event_t event);
+        ggml_backend_event_t (*GGML_CALL event_new)         (ggml_backend_t backend);  // 创建一个新的事件，可以用于记录后端实例中的事件
+        void                 (*GGML_CALL event_free)        (ggml_backend_event_t event);   // 释放事件资源
         // record an event on the backend instance that created it
-        void                 (*GGML_CALL event_record)      (ggml_backend_event_t event);
+        void                 (*GGML_CALL event_record)      (ggml_backend_event_t event);   // 在创建该事件的后端实例中记录事件
         // wait for an event on on a different backend instance
-        void                 (*GGML_CALL event_wait)        (ggml_backend_t backend, ggml_backend_event_t event);
+        void                 (*GGML_CALL event_wait)        (ggml_backend_t backend, ggml_backend_event_t event); // 在不同后端实例上等待事件
         // block until an event is recorded
-        void                 (*GGML_CALL event_synchronize) (ggml_backend_event_t event);
+        void                 (*GGML_CALL event_synchronize) (ggml_backend_event_t event); // 阻止直到事件被记录，确保操作的同步性
     };
 
     struct ggml_backend {

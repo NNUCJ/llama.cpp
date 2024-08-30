@@ -3963,19 +3963,22 @@ struct llama_model_loader {
 
     // Returns false if cancelled by progress_callback
     bool load_all_data(
-            struct ggml_context * ctx,
-            llama_buf_map & bufs_mmap,
-            llama_mlocks * lmlocks,
-            llama_progress_callback progress_callback,
-            void * progress_callback_user_data) {
+            struct ggml_context * ctx,  // 上下文指针
+            llama_buf_map & bufs_mmap,  // 映射缓冲区
+            llama_mlocks * lmlocks,     // 锁对象
+            llama_progress_callback progress_callback,  // 进度回调函数 
+            void * progress_callback_user_data          // 用户数据
+        ) {
         GGML_ASSERT(size_data != 0 && "call init_mappings() first");
-
+        // 缓冲区用于读取数据
         std::vector<no_init<uint8_t>> read_buf;
+        // 用于存储验证结果的异步执行
         std::vector<std::future<std::pair<ggml_tensor *, bool>>> validation_result;
 
 #if defined(GGML_USE_CUDA)
         // 4 staging buffers for async uploads, each sized 1MB seems to be a good default for single NVMe drives.
         // NVMe raid configurations might require more / larger buffers.
+        // 定义常量， 分别表示缓冲区的数量和每个缓冲区的大小
         constexpr size_t num_buffers = 4;
         constexpr size_t buffer_size = 1 * 1024 * 1024; // 1MB
 
@@ -3985,6 +3988,8 @@ struct llama_model_loader {
         size_t buffer_idx = 0; // buffer to use for async loads
 
         ggml_backend_t cuda_backend = nullptr;
+        
+        // 调试llama 7b 未进入一下if 分支（use_mmap 参数为true）
         if (!use_mmap && !check_tensors) {
             // When not using mmaped io use async uploads from pinned memory to GPU memory.
             // First determine if the CUDA backend is active, and if so, determine the device ID.
@@ -4010,8 +4015,9 @@ struct llama_model_loader {
             }
         }
 #endif
-
+        // 使用 ggml_get_first_tensor(ctx) 获取当前上下文中的第一个张量指针 cur，并通过循环遍历所有张量，直到 cur 为 NULL
         for (struct ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
+            // 通过 ggml_get_name(cur) 获取张量的名称，并调用 get_weight 函数获取与该张量对应的权重信息
             const auto * weight = get_weight(ggml_get_name(cur));
             if (weight == nullptr) {
                 // this can happen with split experts models
@@ -4024,14 +4030,17 @@ struct llama_model_loader {
                 }
             }
 
-            size_t n_size = ggml_nbytes(cur);
+            size_t n_size = ggml_nbytes(cur); // 返回当前tensor(cur)所需的字节，并存储在n_size中
 
+            // 使用内存映射
             if (use_mmap) {
                 const auto & mapping = mappings.at(weight->idx);
                 ggml_backend_buffer_t buf_mmap = nullptr;
+                // bufs_mmap 的数据类型llama_buf_map，在bufs_mmap 中查找是否包含对应的缓冲区
                 if (bufs_mmap.count(weight->idx)) {
                     buf_mmap = bufs_mmap.at(weight->idx);
                 }
+                // 计算数据地址，数据偏移由weight->offs 提供
                 uint8_t * data = (uint8_t *) mapping->addr + weight->offs;
 
                 if (check_tensors) {
@@ -4042,6 +4051,7 @@ struct llama_model_loader {
 
                 GGML_ASSERT(buf_mmap || cur->data); // either we have a buffer to allocate the tensor in, or it is already allocated
                 if (buf_mmap && cur->data == nullptr) {
+                    // 如果存在缓冲区并且当前张量尚未分配数据，调用 ggml_backend_tensor_alloc 将数据分配到张量中
                     ggml_backend_tensor_alloc(buf_mmap, cur, data);
                     if (lmlocks) {
                         const auto & lmlock = lmlocks->at(weight->idx);
@@ -4049,12 +4059,15 @@ struct llama_model_loader {
                     }
 
                     auto & mmap_used = mmaps_used[weight->idx];
+                    // 更新已使用的内存映射范围
                     mmap_used.first  = std::min(mmap_used.first,  weight->offs);
                     mmap_used.second = std::max(mmap_used.second, weight->offs + n_size);
                 } else {
+                    // 如果没有缓冲区或者张量已分配数据，调用 ggml_backend_tensor_set 将数据设置到张量。
                     ggml_backend_tensor_set(cur, data, 0, n_size);
                 }
             } else {
+                // 未使用内存映射
                 GGML_ASSERT(weight->idx < files.size());
                 const auto & file = files.at(weight->idx);
                 if (ggml_backend_buffer_is_host(cur->buffer)) {
@@ -5516,7 +5529,7 @@ static bool llm_load_tensors(
         // assign the repeating layers to the devices according to the splits
         int act_gpu_layers = std::min(n_gpu_layers, (int)n_layer + 1);
         for (int64_t i = i_gpu_start; i < n_layer; ++i) {
-            // 找到当前层对应的分割，并将其分配到适当的 GPU
+            // 根据当前层的相对位置（相对于 GPU 层的开始）和分割点计算出当前层应该使用哪个 GPU
             int layer_gpu = std::upper_bound(splits.begin(), splits.begin() + device_count, float(i - i_gpu_start)/act_gpu_layers) - splits.begin();
             model.buft_layer[i] = llama_default_buffer_type_offload(model, layer_gpu);
         }
@@ -5554,12 +5567,15 @@ static bool llm_load_tensors(
         }
     }
 
-    // count used buffer types
+    // count used buffer types(统计在 LLaMA 模型中使用的不同缓冲区类型的数量)
     std::map<ggml_backend_buffer_type_t, int> buft_layer_count;
+    // 统计输入缓冲区的使用次数
     buft_layer_count[model.buft_input.buft]++;
     buft_layer_count[model.buft_input.buft_matrix]++;
+    // 统计输出缓冲区的使用次数
     buft_layer_count[model.buft_output.buft]++;
     buft_layer_count[model.buft_output.buft_matrix]++;
+    // 遍历模型的每一层，统计每层的缓冲区类型的使用次数
     for (int64_t i = 0; i < n_layer; ++i) {
         buft_layer_count[model.buft_layer[i].buft]++;
         buft_layer_count[model.buft_layer[i].buft_matrix]++;
@@ -6916,13 +6932,16 @@ static bool llm_load_tensors(
         // this allows using partial offloading when the model size exceeds the metal buffer size, but not the RAM size
         if (ml.use_mmap && use_mmap_buffer && buft == llama_default_buffer_type_cpu(true)) {
             for (uint32_t idx = 0; idx < ml.files.size(); idx++) {
+                // 初始化地址和范围
                 void * addr = nullptr;
                 size_t first, last;
-                ml.get_mapping_range(&first, &last, &addr, idx, ctx);
+                ml.get_mapping_range(&first, &last, &addr, idx, ctx); // 获取指定文件的内存映射范围和地址
                 if (first >= last) {
                     continue;
                 }
+                // 使用获取到的地址和范围创建后端 CPU 缓冲区。(char *) addr + first 计算出实际数据的起始地址，last - first 计算出数据的大小
                 ggml_backend_buffer_t buf = ggml_backend_cpu_buffer_from_ptr((char *) addr + first, last - first);
+                // 检查缓冲区是否创建成功
                 if (buf == nullptr) {
                     throw std::runtime_error("unable to allocate backend CPU buffer");
                 }
@@ -7123,12 +7142,14 @@ enum llm_norm_type {
 };
 
 static struct ggml_tensor * llm_build_inp_embd(
-        struct ggml_context * ctx,
-       struct llama_context & lctx,
-        const llama_hparams & hparams,
+        struct ggml_context * ctx,      // 上下文指针，用于管理内存
+       struct llama_context & lctx,     // LLaMA 上下文，包含与模型相关的状态信息
+        const llama_hparams & hparams,  // 模型的超参数，包括嵌入维度等
           const llama_batch & batch,
-         struct ggml_tensor * tok_embd,
-         const llm_build_cb & cb) {
+         struct ggml_tensor * tok_embd, // 表示 token 嵌入的张量
+         const llm_build_cb & cb    // 回调函数 
+    )      
+{
     const int64_t n_embd = hparams.n_embd;
 
     struct ggml_tensor * inpL;
@@ -7162,10 +7183,10 @@ static void llm_build_kv_store(
                     int32_t   kv_head,
          const llm_build_cb & cb,
                     int64_t   il) {
-    const int64_t n_ctx = cparams.n_ctx;
+    const int64_t n_ctx = cparams.n_ctx;    // llama2_7b 512
 
-    const int64_t n_embd_k_gqa = hparams.n_embd_k_gqa();
-    const int64_t n_embd_v_gqa = hparams.n_embd_v_gqa();
+    const int64_t n_embd_k_gqa = hparams.n_embd_k_gqa();    // llama2_7b 4096    
+    const int64_t n_embd_v_gqa = hparams.n_embd_v_gqa();    // llama2_7b 4096 
 
     GGML_ASSERT(kv.size == n_ctx);
 
@@ -7933,6 +7954,7 @@ struct llm_build_context {
     }
 
     struct ggml_cgraph * build_llama() {
+        // 调用 ggml_new_graph_custom 初始化一个新的计算图，ctx0 是上下文，LLAMA_MAX_NODES 设定了最大节点数
         struct ggml_cgraph * gf = ggml_new_graph_custom(ctx0, LLAMA_MAX_NODES, false);
 
         // mutable variable, needed during the last layer of the computation to skip unused tokens
@@ -7953,6 +7975,7 @@ struct llm_build_context {
         // KQ_mask (mask for 1 head, it will be broadcasted to all heads)
         struct ggml_tensor * KQ_mask = build_inp_KQ_mask();
 
+        // 网络层循环，即transform block 遍历，例如llama2-7b transform block 数量为32，此处n_layer 的值也为32
         for (int il = 0; il < n_layer; ++il) {
             struct ggml_tensor * inpSA = inpL;
 
@@ -7985,7 +8008,7 @@ struct llm_build_context {
                     Vcur = ggml_add(ctx0, Vcur, model.layers[il].bv);
                     cb(Vcur, "Vcur", il);
                 }
-
+                // 旋转编码
                 Qcur = ggml_rope_ext(
                     ctx0, ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head, n_tokens), inp_pos, nullptr,
                     n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
@@ -8048,7 +8071,7 @@ struct llm_build_context {
                         cb, il);
                 cb(cur, "ffn_moe_out", il);
             }
-
+            // 残差连接
             cur = ggml_add(ctx0, cur, ffn_inp);
             cb(cur, "ffn_out", il);
 
@@ -8060,7 +8083,7 @@ struct llm_build_context {
         }
 
         cur = inpL;
-
+        // 计算输出
         cur = llm_build_norm(ctx0, cur, hparams,
                 model.output_norm, NULL,
                 LLM_NORM_RMS, cb, -1);
@@ -8070,6 +8093,7 @@ struct llm_build_context {
         cur = ggml_mul_mat(ctx0, model.output, cur);
         cb(cur, "result_output", -1);
 
+        // 构建前向图以便进行后续的推断或训练
         ggml_build_forward_expand(gf, cur);
 
         return gf;
@@ -12173,12 +12197,13 @@ static struct ggml_cgraph * llama_build_graph(
          llama_context & lctx,
      const llama_batch & batch,
                   bool   worst_case) {
-    const auto & model = lctx.model;
+    const auto & model = lctx.model; //获取模型信息
 
     // this callback allows us to apply custom logic to each tensor (e.g. ggml-alloc, offloading, etc.)
+    // 定义回调函数，用于处理每个张量
     llm_build_cb cb = [&](struct ggml_tensor * cur, const char * name, int il) {
         if (il >= 0) {
-            ggml_format_name(cur, "%s-%d", name, il);
+            ggml_format_name(cur, "%s-%d", name, il); // 格式化tensor name
         } else {
             ggml_set_name(cur, name);
         }
@@ -12192,7 +12217,9 @@ static struct ggml_cgraph * llama_build_graph(
 
         // norm may be automatically assigned to the backend of the previous layer, increasing data transfer between backends
         // FIXME: fix in ggml_backend_sched
+        // 处理归一化层的后端
         const bool full_offload = lctx.model.n_gpu_layers > (int)lctx.model.hparams.n_layer;
+        // 根据输入批次的 token 数量和模型的 GPU 层数决定是否完全卸载（full_offload
         if (batch.n_tokens < 32 || full_offload) {
             if (il != -1 && strcmp(name, "norm") == 0) {
                 for (auto * backend : lctx.backends) {
@@ -14551,7 +14578,7 @@ static std::vector<llama_vocab::id> llama_tokenize_internal(const llama_vocab & 
                 //
                 // tokenizer.encode('', add_special_tokens=True)  returns [1]
                 // tokenizer.encode('', add_special_tokens=False) returns []
-
+                
                 bool is_prev_special = false;
 
                 if (add_special && vocab.tokenizer_add_bos) {

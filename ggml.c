@@ -5285,7 +5285,6 @@ struct ggml_tensor * ggml_mul_mat(
     if (a->grad || b->grad) {
         is_node = true;
     }
-
     const int64_t ne[4] = { a->ne[1], b->ne[1], b->ne[2], b->ne[3] };
     struct ggml_tensor * result = ggml_new_tensor(ctx, GGML_TYPE_F32, 4, ne);
 
@@ -5991,7 +5990,7 @@ struct ggml_tensor * ggml_get_rows(
     }
     struct ggml_tensor * result = ggml_new_tensor_4d(ctx, type, a->ne[0], b->ne[0], b->ne[1], b->ne[2]);
 
-    result->op   = GGML_OP_GET_ROWS;
+    result->op   = GGML_OP_GET_ROWS; // 设置提取行操作
     result->grad = is_node ? ggml_dup_tensor(ctx, result) : NULL;
     result->src[0] = a;
     result->src[1] = b;
@@ -12977,24 +12976,31 @@ static void ggml_compute_forward_get_rows_q(
     assert(nb00 == ggml_type_size(type));
     assert(ggml_nrows(dst) == nr);
 
-    const int ith = params->ith;
-    const int nth = params->nth;
+    const int ith = params->ith;  // ith 表示 index of thread
+    const int nth = params->nth;     // nth 表示 number of thread
 
-    // rows per thread
-    const int dr = (nr + nth - 1)/nth;
+    // rows per thread, dr 表示每个thread 分配到的input token数量
+    const int dr = (nr + nth - 1)/nth; 
 
     // row range for this thread
     const int ir0 = dr*ith;
     const int ir1 = MIN(ir0 + dr, nr);
 
     for (int64_t i = ir0; i < ir1; ++i) {
-        const int64_t i12 = i/(ne11*ne10);
-        const int64_t i11 = (i - i12*ne11*ne10)/ne10;
-        const int64_t i10 = (i - i12*ne11*ne10 - i11*ne10);
+        /*
+        对当前输入tokens 进行多维索引转换
+        */
+        const int64_t i12 = i/(ne11*ne10);  // 在第二维上的索引
+        const int64_t i11 = (i - i12*ne11*ne10)/ne10;   // 第一维上的索引
+        const int64_t i10 = (i - i12*ne11*ne10 - i11*ne10); // 第0维上的索引
+        // 根据各个维度上的索引值，计算当前input token 的具体值 
         const int64_t i01 = *(int32_t *) ((char *) src1->data + i10*nb10 + i11*nb11 + i12*nb12);
-
+        /*
+            此时i01的值为promopt 编码后的int32 类型index,如 [ '<s>':1, ' who':1058, ' are':526, ' you':366 ]， 
+        例如`who` 对应index 为1058， 因此后续从embedding_weight(src0) 中需要选择其第1058行（src0 shape [4096, 32000], 表示[W, H]）
+        */ 
         assert(i01 >= 0 && i01 < ne01);
-
+        // 
         dequantize_row_q(
                 (const void *) ((char *) src0->data + i01*nb01 + i11*nb02 + i12*nb03),
                      (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc);
@@ -18649,13 +18655,16 @@ struct ggml_cplan ggml_graph_plan(const struct ggml_cgraph * cgraph, int n_threa
 }
 
 static thread_ret_t ggml_graph_compute_thread(void * data) {
+    // 将传入的数据转换为 ggml_compute_state 结构体
     struct ggml_compute_state * state = (struct ggml_compute_state *) data;
 
+    // 提取计算图和计算计划的信息
     const struct ggml_cgraph * cgraph = state->shared->cgraph;
     const struct ggml_cplan  * cplan  = state->shared->cplan;
 
     set_numa_thread_affinity(state->ith);
 
+    // 创建一个 ggml_compute_params 结构体，用于存储当前线程的索引、线程总数、工作区大小、工作数据和共享状态。
     struct ggml_compute_params params = {
         /*.ith   =*/ state->ith,
         /*.nth   =*/ state->shared->n_threads,
@@ -18669,10 +18678,16 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 
         ggml_compute_forward(&params, node);
 
+        /*
+        如果当前线程是主线程（通常是线程索引为0），检查是否需要中止计算。如果中止条件成立，
+        更新共享状态的错误代码为 GGML_STATUS_ABORTED。
+        */
         if (state->ith == 0 && cplan->abort_callback && cplan->abort_callback(cplan->abort_callback_data)) {
             state->shared->ec = GGML_STATUS_ABORTED;
         }
 
+
+        // 线程同步
         ggml_barrier(state->shared);
 
         if (state->shared->ec != GGML_STATUS_SUCCESS) {
@@ -18684,12 +18699,14 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 }
 
 enum ggml_status ggml_graph_compute(struct ggml_cgraph * cgraph, struct ggml_cplan * cplan) {
+    // 使用断言确保传入的计算计划 (cplan) 是有效的，并且线程数量大于0，同时如果工作区大小不为0，则工作数据也必须被初始化。
     GGML_ASSERT(cplan);
     GGML_ASSERT(cplan->n_threads > 0);
     GGML_ASSERT(cplan->work_size == 0 || cplan->work_data != NULL);
 
     int n_threads = cplan->n_threads;
 
+    // 初始化一个 state_shared 结构体，其中存储了计算状态的共享信息，包括计算图、计划、线程数量等
     struct ggml_compute_state_shared state_shared = {
         /*.cgraph                  =*/ cgraph,
         /*.cgraph_plan             =*/ cplan,

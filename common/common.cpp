@@ -1711,6 +1711,9 @@ std::string string_get_sortable_timestamp() {
     return std::string(timestamp_no_ns) + "." + std::string(timestamp_ns);
 }
 
+/*
+用于处理字符串中的转义字符，特别是常见的转义序列，如换行符、制表符等
+*/
 void string_process_escapes(std::string & input) {
     std::size_t input_len = input.length();
     std::size_t output_idx = 0;
@@ -1724,7 +1727,7 @@ void string_process_escapes(std::string & input) {
                 case '\'': input[output_idx++] = '\''; break;
                 case '\"': input[output_idx++] = '\"'; break;
                 case '\\': input[output_idx++] = '\\'; break;
-                case 'x':
+                case 'x': // 处理十六进制数
                     // Handle \x12, etc
                     if (input_idx + 2 < input_len) {
                         const char x[3] = { input[input_idx + 1], input[input_idx + 2], 0 };

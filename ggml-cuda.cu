@@ -2440,19 +2440,23 @@ GGML_CALL static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t
     ggml_cuda_set_device(cuda_ctx->device);
 
 #ifdef USE_CUDA_GRAPH
+
+    // 检查环境变量 GGML_CUDA_DISABLE_GRAPHS 是否存在，以决定是否禁用 CUDA 图
     static const bool disable_cuda_graphs_due_to_env = (getenv("GGML_CUDA_DISABLE_GRAPHS") != nullptr);
 
-    // Objects required for CUDA Graph
+    // Objects required for CUDA Graph  如果 CUDA 图对象未初始化，则创建一个新的 ggml_cuda_graph 实例
     if (cuda_ctx->cuda_graph == nullptr) {
         cuda_ctx->cuda_graph.reset(new ggml_cuda_graph());
     }
 
+    // 默认情况下启用 CUDA 图，设置标记以跟踪是否需要更新图。
     bool use_cuda_graph = true;
     bool cuda_graph_update_required = false;
     // vector of pointers to CUDA cpy kernels, which are required to identify
     // kernel parameters which need updated in the graph for each token
     std::vector<void *> ggml_cuda_cpy_fn_ptrs;
 
+    // 检查 GPU 架构是否支持 CUDA 图
     if (cuda_ctx->cuda_graph->graph == nullptr) {
         if (ggml_cuda_info().devices[cuda_ctx->device].cc < CC_AMPERE) {
             cuda_ctx->cuda_graph->disable_due_to_gpu_arch = true;
@@ -2465,6 +2469,7 @@ GGML_CALL static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t
     // Disable CUDA graphs in presence of env var, old GPU, use-case which is changing too rapidly,
     // or previous graph capture failure.
     // Also disable for multi-gpu for now. TO DO investigate
+    // 根据多种条件检查是否禁用 CUDA 图，包括环境变量、GPU 架构、过多更新等
     if (disable_cuda_graphs_due_to_env
         || cuda_ctx->cuda_graph->disable_due_to_gpu_arch
         || cuda_ctx->cuda_graph->disable_due_to_too_many_updates
@@ -2485,6 +2490,8 @@ GGML_CALL static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t
 
         // Loop over nodes in GGML graph to determine if CUDA graph update is required
         // and store properties to allow this comparison for the next token
+        // 遍历每个节点，检查其属性是否与 CUDA 图中的相匹配，并更新属性
+        
         for (int i = 0; i < cgraph->n_nodes; i++) {
             bool has_matching_properties = true;
             if (!cuda_graph_update_required) {

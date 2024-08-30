@@ -1037,47 +1037,46 @@ struct ggml_backend_sched_split {
 };
 
 struct ggml_backend_sched {
-    bool is_reset; // true if the scheduler has been reset since the last graph split
-    bool is_alloc;
+    bool is_reset; // 表示调度器自上次图分割以来是否已被重置。如果为 true，则说明调度器状态已重置，可能需要重新初始化或重新配置。
+    bool is_alloc; // 指示资源是否已分配。用于跟踪是否已经为后端分配了必要的资源
 
-    int n_backends;
+    int n_backends; // 表示当前调度器管理的后端数量
 
-    ggml_backend_t backends[GGML_SCHED_MAX_BACKENDS];
-    ggml_backend_buffer_type_t bufts[GGML_SCHED_MAX_BACKENDS];
-    ggml_gallocr_t galloc;
+    ggml_backend_t backends[GGML_SCHED_MAX_BACKENDS];   // 存储多个后端实例的引用。GGML_SCHED_MAX_BACKENDS 是一个常量，定义了可以使用的最大后端数量
+    ggml_backend_buffer_type_t bufts[GGML_SCHED_MAX_BACKENDS];  // 存储与每个后端相关的缓冲区类型。用于管理不同后端的内存分配策略
+    ggml_gallocr_t galloc;  // 用于管理图计算过程中的内存分配和释放
 
     // hash keys of the nodes in the graph
-    struct ggml_hash_set    hash_set;
+    struct ggml_hash_set    hash_set;       // 用于存储图中节点的哈希键。可以用于快速查找和去重
     // hash values
-    int * tensor_backend_id;
-    struct ggml_tensor * (* tensor_copies)[GGML_SCHED_MAX_BACKENDS][GGML_SCHED_MAX_COPIES];
+    int * tensor_backend_id;                // 一个指向整数的指针，表示每个张量的后端标识符。这有助于跟踪每个张量在不同后端之间的分配
+    struct ggml_tensor * (* tensor_copies)[GGML_SCHED_MAX_BACKENDS][GGML_SCHED_MAX_COPIES]; // 存储在多个后端中的张量副本。GGML_SCHED_MAX_COPIES 是一个常量，表示每个后端可能保存的最大副本数量
 
-    int * node_backend_ids; // [graph_size]
-    int * leaf_backend_ids; // [graph_size]
+    int * node_backend_ids; // [graph_size] // 存储图中每个节点的后端 ID。数组大小与图的节点数量相同
+    int * leaf_backend_ids; // [graph_size] 存储图中每个叶子节点的后端 ID
 
-    int * prev_node_backend_ids; // [graph_size]
-    int * prev_leaf_backend_ids; // [graph_size]
+    int * prev_node_backend_ids; // [graph_size]存储图中每个节点的上一个后端 ID，可能用于记录状态变化
+    int * prev_leaf_backend_ids; // [graph_size]存储图中每个叶子节点的上一个后端 ID
 
     // copy of the graph with modified inputs
-    struct ggml_cgraph * graph;
+    struct ggml_cgraph * graph;     // 指向图的指针，存储当前使用的计算图的副本，可能包含修改后的输入
 
     // graph splits
-    struct ggml_backend_sched_split * splits;
-    int n_splits;
-    int splits_capacity;
+    struct ggml_backend_sched_split * splits;   // 一个指向图分割结构的指针，用于管理图的分割信息
+    int n_splits;                   // 表示当前图的分割数量
+    int splits_capacity;               // 表示可用的分割容量，帮助管理内存使用
 
     // pipeline parallelism support
     int n_copies;
     int cur_copy;
-    ggml_backend_event_t events[GGML_SCHED_MAX_BACKENDS][GGML_SCHED_MAX_COPIES];
-    struct ggml_tensor * graph_inputs[GGML_SCHED_MAX_SPLIT_INPUTS];
-    int n_graph_inputs;
+    ggml_backend_event_t events[GGML_SCHED_MAX_BACKENDS][GGML_SCHED_MAX_COPIES];    // 存储在每个后端中与每个副本相关的事件，用于同步和调度管理
+    struct ggml_tensor * graph_inputs[GGML_SCHED_MAX_SPLIT_INPUTS];     // 存储输入到图中的张量，支持图的分割输入
+    int n_graph_inputs;            //  表示当前图输入的数量
 
     struct ggml_context * ctx;
 
-    ggml_backend_sched_eval_callback callback_eval;
-    void * callback_eval_user_data;
-
+    ggml_backend_sched_eval_callback callback_eval;         // 用于在调度评估时执行指定的操作
+    void * callback_eval_user_data;         // 指向用户数据的指针，通常用于在回调中传递额外的信息或上下文
     bool debug;
 
     // align context_buffer to GGML_MEM_ALIGN

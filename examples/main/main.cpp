@@ -214,11 +214,12 @@ int main(int argc, char ** argv) {
         LOG_TEE("%s: error: unable to load model\n", __func__);
         return 1;
     }
-
+    // 获取模型训练时的上下文长度
     const int n_ctx_train = llama_n_ctx_train(model);
     const int n_ctx = llama_n_ctx(ctx);
     LOG("n_ctx: %d\n", n_ctx);
 
+    // 如果当前上下文长度超过模型训练时的最大上下文长度，则打印警告信息，提醒用户当前指定的上下文超过模型的训练能力
     if (n_ctx > n_ctx_train) {
         LOG_TEE("%s: warning: model was trained on only %d context tokens (%d specified)\n",
                 __func__, n_ctx_train, n_ctx);
@@ -232,11 +233,14 @@ int main(int argc, char ** argv) {
         LOG_TEE("%s\n", gpt_params_get_system_info(params).c_str());
     }
 
+    // 会话管理
     std::string path_session = params.path_prompt_cache;
     std::vector<llama_token> session_tokens;
 
+    // 检查 path_session 是否为空，只有在非空的情况下才尝试加载会话
     if (!path_session.empty()) {
         LOG_TEE("%s: attempting to load saved session from '%s'\n", __func__, path_session.c_str());
+        // 使用 file_exists 检查会话文件是否存在，如果不存在，则会创建一个新会话
         if (!file_exists(path_session)) {
             LOG_TEE("%s: session file does not exist, will create.\n", __func__);
         } else if (file_is_empty(path_session)) {
@@ -254,16 +258,19 @@ int main(int argc, char ** argv) {
         }
     }
 
-    const bool add_bos = llama_should_add_bos_token(model);
-    GGML_ASSERT(llama_add_eos_token(model) != 1);
+    // bos beginning of sentence
+    const bool add_bos = llama_should_add_bos_token(model);  // 检查模型是否应该添加开始标记（BOS token
+    // 确保模型不应该在某些情况下添加结束标记（EOS token
+    GGML_ASSERT(llama_add_eos_token(model) != 1);  // eos 代表end of sentence 
     LOG("add_bos: %d\n", add_bos);
 
+    // 初始化token vector 
     std::vector<llama_token> embd_inp;
 
     {
         auto prompt = params.conversation
             ? chat_add_and_format(model, chat_msgs, "system", params.prompt) // format the system prompt in conversation mode
-            : params.prompt;
+            : params.prompt;  // params.prompt ""
         if (params.interactive_first || !params.prompt.empty() || session_tokens.empty()) {
             LOG("tokenize the prompt\n");
             embd_inp = ::llama_tokenize(ctx, prompt, true, true);
@@ -277,6 +284,7 @@ int main(int argc, char ** argv) {
     }
 
     // Should not run without any tokens
+    // 如果 embd_inp 为空，则添加 BOS token 以防止后续处理出错
     if (embd_inp.empty()) {
         embd_inp.push_back(llama_token_bos(model));
         LOG("embd_inp was considered empty and bos was added: %s\n", LOG_TOKENS_TOSTR_PRETTY(ctx, embd_inp).c_str());
@@ -286,6 +294,7 @@ int main(int argc, char ** argv) {
     std::vector<llama_token> guidance_inp;
     int guidance_offset = 0;
     int original_prompt_len = 0;
+    // 如果启用了指导上下文 (ctx_guidance)，则标记化负面提示并记录其长度和偏移量
     if (ctx_guidance) {
         LOG("cfg_negative_prompt: \"%s\"\n", log_tostr(sparams.cfg_negative_prompt));
 
@@ -301,6 +310,7 @@ int main(int argc, char ** argv) {
         LOG("guidance_offset:     %s", log_tostr(guidance_offset));
     }
 
+    // 检查 embd_inp 的长度是否超出上下文限制。如果超出，则记录错误并返回
     if ((int) embd_inp.size() > n_ctx - 4) {
         LOG_TEE("%s: error: prompt is too long (%d tokens, max %d)\n", __func__, (int) embd_inp.size(), n_ctx - 4);
         return 1;
@@ -402,9 +412,10 @@ int main(int argc, char ** argv) {
 #endif
     }
 
+    //  检查交互模式
     if (params.interactive) {
         LOG_TEE("%s: interactive mode on.\n", __func__);
-
+        // 处理反向提示（Antiprompt）
         if (!params.antiprompt.empty()) {
             for (const auto & antiprompt : params.antiprompt) {
                 LOG_TEE("Reverse prompt: '%s'\n", antiprompt.c_str());
@@ -518,7 +529,7 @@ int main(int argc, char ** argv) {
     }
 
     while ((n_remain != 0 && !is_antiprompt) || params.interactive) {
-        // predict
+        // predict 检查输入的 embd 是否为空，然后与最大上下文大小进行比较。
         if (!embd.empty()) {
             // Note: (n_ctx - 4) here is to match the logic for commandline prompt handling via
             // --prompt or --file which uses the same value.
@@ -710,16 +721,18 @@ int main(int argc, char ** argv) {
 
             LOG("n_remain: %d\n", n_remain);
         } else {
-            // some user input remains from prompt or interaction, forward it to processing
+            // some user input remains from prompt or interaction, forward it to processing(处理用户输入)
             LOG("embd_inp.size(): %d, n_consumed: %d\n", (int) embd_inp.size(), n_consumed);
+            // 当还有未处理的输入 token 时（即 embd_inp 中的 token 数量大于已处理的数量 n_consumed），执行循环
             while ((int) embd_inp.size() > n_consumed) {
+                // 将当前未处理的 token 添加到 embd 容器中。
                 embd.push_back(embd_inp[n_consumed]);
 
                 // push the prompt in the sampling context in order to apply repetition penalties later
                 // for the prompt, we don't apply grammar rules
                 llama_sampling_accept(ctx_sampling, ctx, embd_inp[n_consumed], /* apply_grammar= */ false);
 
-                ++n_consumed;
+                ++n_consumed;   // 增加已处理的 token 计数器 n_consumed
                 if ((int) embd.size() >= params.n_batch) {
                     break;
                 }
@@ -822,6 +835,8 @@ int main(int argc, char ** argv) {
                 assistant_ss << llama_token_to_piece(ctx, id, false);
             }
 
+            // 用户输入处理
+            // 如果在交互模式下并且有过去的上下文（n_past > 0），则等待用户输入
             if (n_past > 0 && is_interacting) {
                 LOG("waiting for user input\n");
 
@@ -846,6 +861,10 @@ int main(int argc, char ** argv) {
 
                 std::string line;
                 bool another_line = true;
+                /*
+                通过循环 console::readline 方法读取用户输入，直到用户输入为空行或终止输入（例如，按下回车）。
+                用户输入的内容会被逐行追加到 buffer 中。
+                */
                 do {
                     another_line = console::readline(line, params.multiline_input);
                     buffer += line;
@@ -855,8 +874,9 @@ int main(int argc, char ** argv) {
                 console::set_display(console::reset);
                 display = true;
 
-                // Add tokens to embd only if the input buffer is non-empty
+                // Add tokens to embd only if the input buffer is non-emptyo
                 // Entering a empty line lets the user pass control back
+                // 确保只有在用户实际输入内容时才进行后续处理
                 if (buffer.length() > 1) {
                     // append input suffix if any
                     if (!params.input_suffix.empty() && !params.conversation) {
@@ -872,10 +892,13 @@ int main(int argc, char ** argv) {
                         string_process_escapes(buffer);
                     }
 
+                    // 格式化用户输入
                     std::string user_inp = params.conversation
                         ? chat_add_and_format(model, chat_msgs, "user", std::move(buffer))
                         : std::move(buffer);
                     // TODO: one inconvenient of current chat template implementation is that we can't distinguish between user input and special tokens (prefix/postfix)
+
+                    // 生成token 并更新输入
                     const auto line_pfx = ::llama_tokenize(ctx, params.input_prefix, false, true);
                     const auto line_inp = ::llama_tokenize(ctx, user_inp,            false, params.conversation);
                     const auto line_sfx = ::llama_tokenize(ctx, params.input_suffix, false, true);
@@ -886,6 +909,7 @@ int main(int argc, char ** argv) {
                     embd_inp.insert(embd_inp.end(), line_inp.begin(), line_inp.end());
                     embd_inp.insert(embd_inp.end(), line_sfx.begin(), line_sfx.end());
 
+                    // 将新生成的 token 添加到 output_tokens 中，并将其转化为文本追加到 output_ss 中
                     for (size_t i = original_size; i < embd_inp.size(); ++i) {
                         const llama_token token = embd_inp[i];
                         output_tokens.push_back(token);
@@ -894,7 +918,8 @@ int main(int argc, char ** argv) {
 
                     // reset assistant message
                     assistant_ss.str("");
-
+                    
+                    // 更新剩余 token 数量
                     n_remain -= line_inp.size();
                     LOG("n_remain: %d\n", n_remain);
                 } else {

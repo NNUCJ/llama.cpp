@@ -2,23 +2,23 @@
 #include <cstdint>
 
 static __global__ void quantize_q8_1(const float * __restrict__ x, void * __restrict__ vy, const int64_t kx, const int64_t kx0_padded) {
-    const int64_t ix0 = (int64_t)blockDim.x*blockIdx.x + threadIdx.x;
+    const int64_t ix0 = (int64_t)blockDim.x*blockIdx.x + threadIdx.x;  // 计算当前线程在线程块中的水平索引
 
     if (ix0 >= kx0_padded) {
         return;
     }
 
-    const int64_t ix1 = blockIdx.y;
+    const int64_t ix1 = blockIdx.y; //当前线程在y方向处理的块索引
 
     const int64_t i_padded = ix1*kx0_padded + ix0;
 
     block_q8_1 * y = (block_q8_1 *) vy;
 
-    const int64_t ib = i_padded / QK8_1; // block index
-    const int64_t iqs = i_padded % QK8_1; // quant index
+    const int64_t ib = i_padded / QK8_1; // block index 因为结构体数据是以32为一组，所以ib计算得到当前数据所在结构体block的index
+    const int64_t iqs = i_padded % QK8_1; // quant index  iqs计算的就是当前数据所在结构体内部的index
 
     const float xi = ix0 < kx ? x[ix1*kx + ix0] : 0.0f;
-    float amax = fabsf(xi);
+    float amax = fabsf(xi);  // 当前数据的绝对值
     float sum = xi;
 
     amax = warp_reduce_max(amax);
